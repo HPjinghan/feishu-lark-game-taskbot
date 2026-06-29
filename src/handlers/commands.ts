@@ -2,10 +2,8 @@ import type { Env } from "../types";
 import { getTenantAccessToken } from "../lark/auth";
 import { replyText } from "../lark/message";
 import { getFieldIdNameMap } from "../bitable/fields";
-import { getBitableFileTokenForDrive } from "../bitable/fields";
-import { getBoundUser } from "../utils/notify";
-import { getAdminOpenIds } from "../utils/notify";
-import { kvGet, kvPut, kvDelete } from "../kv";
+import { getBoundUser, getAdminOpenIds } from "../utils/notify";
+import { kvGet } from "../kv";
 import { VALID_STATUSES, ROLE_ART_REVIEWER_KEY, ROLE_QA_KEY, LAST_BITABLE_EVENT_KEY, LAST_DRIVE_EVENT_KEY } from "../config";
 import { handleShowTask } from "./tasks";
 

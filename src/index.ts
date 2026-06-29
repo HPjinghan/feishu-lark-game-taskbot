@@ -117,7 +117,7 @@ export default {
       } else if (text.trim().includes("拉群")) {
         try {
           if (userMentions.length === 0) {
-            await replyText(env, chatId, "没有识别到要拉进群的人，请在"拉群"后面 @ 用户。");
+            await replyText(env, chatId, '没有识别到要拉进群的人，请在「拉群」后面 @ 用户。');
           } else {
             const { createGroupChat } = await import("./lark/group");
             const openIds = [...new Set([senderOpenId, ...userMentions.map((u) => u.openId)].filter(Boolean))];

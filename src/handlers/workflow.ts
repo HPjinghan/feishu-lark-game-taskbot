@@ -2,7 +2,7 @@ import type { Env, BoundUser, PendingAcceptor } from "../types";
 import { getTenantAccessToken } from "../lark/auth";
 import { replyText } from "../lark/message";
 import { searchTaskByTaskId, getTaskByRecordId, updateTaskStatus, updateTaskFields, updateTaskAcceptor } from "../bitable/records";
-import { normalizeValue, getPersonOpenIds, formatReviewNotice, formatQaNotice, formatRejectNotice, formatDueDateChangeNotice, formatDateOnly } from "../utils/format";
+import { normalizeValue, getPersonOpenIds, formatReviewNotice, formatQaNotice, formatRejectNotice, formatDateOnly } from "../utils/format";
 import { parseDateRange } from "../utils/parse";
 import { notifyUsers, notifyUsersOnce, getBoundUser, setBoundUser } from "../utils/notify";
 import { markRecentSelfAction } from "../utils/dedupe";
