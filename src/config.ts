@@ -35,7 +35,63 @@ export const VALID_STATUSES = [
 ];
 
 export const MY_TASK_STATUSES = ["未开始", "进行中", "重新打开"];
-export const ACCEPTANCE_TASK_STATUSES = ["下游验收", "美术验收", "转测试"];
+
+// KV keys for role bindings.
+export const ROLE_ART_REVIEWER_KEY = "role:art_reviewer";
+export const ROLE_QA_KEY = "role:qa";
+
+// Human-readable display names for each role key.
+export const ROLE_DISPLAY_NAMES: Record<string, string> = {
+  [ROLE_ART_REVIEWER_KEY]: "美术验收人",
+  [ROLE_QA_KEY]: "QA",
+};
+
+// ─── Workflow routing ────────────────────────────────────────────────────────
+//
+// Defines which acceptance stages each task type goes through, in order.
+// The last entry must always be "已完成".
+// Types not listed fall through to "default".
+//
+// To customise for your team, edit this map — no other code needs changing.
+export const WORKFLOW: Record<string, string[]> = {
+  "客户端": ["下游验收", "美术验收", "转测试", "已完成"],
+  "UI":     ["下游验收", "美术验收", "已完成"],
+  "服务器": ["下游验收", "转测试", "已完成"],
+  "default":["下游验收", "已完成"],
+};
+
+// Which KV role key is auto-assigned as acceptor when entering each stage.
+// Stages not listed keep the existing acceptor field value.
+export const STAGE_ROLE: Record<string, string> = {
+  "美术验收": ROLE_ART_REVIEWER_KEY,
+  "转测试":   ROLE_QA_KEY,
+};
+
+// Derived: all stages that count as "waiting for acceptance"
+// (appears in any workflow, not a working status, not 已完成).
+const _workingStatuses = new Set([...MY_TASK_STATUSES, "已完成", "已停滞"]);
+export const ACCEPTANCE_TASK_STATUSES = [
+  ...new Set(Object.values(WORKFLOW).flat().filter((s) => !_workingStatuses.has(s))),
+];
+
+// ─── Workflow helpers ────────────────────────────────────────────────────────
+
+/** Returns the next stage for a given task type and current status, or null if not in workflow. */
+export function getNextStage(taskType: string, currentStatus: string): string | null {
+  const stages = WORKFLOW[taskType] ?? WORKFLOW["default"];
+  const idx = stages.indexOf(currentStatus);
+  if (idx === -1 || idx >= stages.length - 1) return null;
+  return stages[idx + 1];
+}
+
+/** Returns true if the current status is an acceptance stage for this task type. */
+export function isAcceptanceStage(taskType: string, status: string): boolean {
+  const stages = WORKFLOW[taskType] ?? WORKFLOW["default"];
+  const idx = stages.indexOf(status);
+  return idx > 0 && status !== "已完成";
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 // Keywords that trigger each query type.
 export const MY_TASK_QUERY_KEYWORDS = [
@@ -45,12 +101,6 @@ export const ACCEPTANCE_TASK_QUERY_KEYWORDS = [
   "待我验收", "我的验收", "需要我验收", "验收任务", "待验收",
 ];
 export const HELP_QUERY_KEYWORDS = ["帮助", "help", "菜单", "命令"];
-
-// KV keys for role bindings.
-// "美术验收人" role (e.g. Art Director) handles art acceptance.
-// "QA" role handles testing acceptance.
-export const ROLE_ART_REVIEWER_KEY = "role:art_reviewer";
-export const ROLE_QA_KEY = "role:qa";
 
 // KV keys for other state.
 export const FIELD_MAP_KEY = "bitable:field_map";

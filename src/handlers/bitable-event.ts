@@ -1,14 +1,15 @@
 import type { Env, EventFieldValue } from "../types";
 import { getTenantAccessToken } from "../lark/auth";
 import { getFieldIdNameMap, getBitableFileTokenForDrive } from "../bitable/fields";
-import { getTaskByRecordId, updateTaskAcceptor } from "../bitable/records";
+import { getTaskByRecordId } from "../bitable/records";
 import { normalizeValue, getPersonOpenIds, formatReviewNotice, formatQaNotice, formatTaskAssignedNotice, formatDueDateChangeNotice } from "../utils/format";
-import { notifyUsers, notifyUsersOnce, getBoundUser } from "../utils/notify";
-import { hasRecentSelfAction, markRecentSelfAction } from "../utils/dedupe";
+import { notifyUsers, notifyUsersOnce } from "../utils/notify";
+import { hasRecentSelfAction } from "../utils/dedupe";
 import { kvPut } from "../kv";
+import { ensureStageAcceptor } from "./workflow";
 import {
   FIELD_STATUS, FIELD_OWNER, FIELD_ACCEPTOR, FIELD_DUE_DATE,
-  ACCEPTANCE_TASK_STATUSES, ROLE_QA_KEY, LAST_BITABLE_EVENT_KEY, LAST_DRIVE_EVENT_KEY,
+  ACCEPTANCE_TASK_STATUSES, STAGE_ROLE, ROLE_QA_KEY, LAST_BITABLE_EVENT_KEY, LAST_DRIVE_EVENT_KEY,
 } from "../config";
 
 function isDebugEnabled(env: Env): boolean {
@@ -64,12 +65,6 @@ function getBeforeFieldValue(action: any, idToName: Record<string, string>, fiel
   return getEventValuesByFieldName(action.before_value || [], idToName)[fieldName] || "";
 }
 
-async function ensureQaAcceptorOnEvent(env: Env, token: string, recordId: string, currentAcceptorIds: string[]): Promise<void> {
-  const qa = await getBoundUser(env, ROLE_QA_KEY);
-  if (!qa || currentAcceptorIds.includes(qa.openId)) return;
-  await markRecentSelfAction(env, recordId, "set_acceptor");
-  await updateTaskAcceptor(env, token, recordId, qa.openId);
-}
 
 export async function handleBitableRecordChanged(env: Env, body: any): Promise<void> {
   const event = body.event || {};
@@ -141,14 +136,18 @@ export async function handleBitableRecordChanged(env: Env, body: any): Promise<v
       fired.push(`dueDate → ${ownerOpenIds.join(",")}`);
     }
 
-    const turnedToTesting = statusChanged && currentStatus === "转测试";
-    const addedAsTesting = action.action === "record_added" && currentStatus === "转测试";
-    if ((turnedToTesting && !skipSelfStatus) || addedAsTesting) {
-      await ensureQaAcceptorOnEvent(env, token, action.record_id, acceptorOpenIds);
-      const qa = await getBoundUser(env, ROLE_QA_KEY);
-      if (qa) {
-        await notifyUsersOnce(env, "qa", action.record_id, [qa.openId], formatQaNotice(record));
-        fired.push(`qa → ${qa.openId}`);
+    // For any role-based stage entered via table edit, auto-assign + notify the role user.
+    const enteredRoleStage =
+      STAGE_ROLE[currentStatus] &&
+      ((statusChanged && !skipSelfStatus) || action.action === "record_added");
+    if (enteredRoleStage) {
+      const roleUser = await ensureStageAcceptor(env, token, action.record_id, currentStatus, acceptorOpenIds);
+      if (roleUser) {
+        const isQaStage = STAGE_ROLE[currentStatus] === ROLE_QA_KEY;
+        const noticeKind = isQaStage ? "qa" : "review";
+        const noticeText = isQaStage ? formatQaNotice(record) : formatReviewNotice(record);
+        await notifyUsersOnce(env, noticeKind, action.record_id, [roleUser.openId], noticeText);
+        fired.push(`${noticeKind} → ${roleUser.openId}`);
       }
     }
 

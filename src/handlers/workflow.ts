@@ -9,7 +9,8 @@ import { markRecentSelfAction } from "../utils/dedupe";
 import { kvGet, kvPut, kvDelete } from "../kv";
 import {
   FIELD_STATUS, FIELD_ACCEPTOR, FIELD_OWNER, FIELD_DUE_DATE, FIELD_START_DATE, FIELD_TYPE,
-  ACCEPTANCE_TASK_STATUSES, ROLE_ART_REVIEWER_KEY, ROLE_QA_KEY, PENDING_ACCEPTOR_TTL_SECONDS,
+  ACCEPTANCE_TASK_STATUSES, ROLE_ART_REVIEWER_KEY, ROLE_QA_KEY, ROLE_DISPLAY_NAMES,
+  PENDING_ACCEPTOR_TTL_SECONDS, STAGE_ROLE, getNextStage, isAcceptanceStage,
 } from "../config";
 
 function pendingAcceptorKey(chatId: string, senderOpenId: string): string {
@@ -22,15 +23,37 @@ async function getPendingAcceptor(env: Env, key: string): Promise<PendingAccepto
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-// When a task enters "转测试", ensure the QA role user is set as acceptor.
-async function ensureQaAcceptor(env: Env, token: string, recordId: string, currentAcceptorIds: string[]): Promise<BoundUser | null> {
-  const qa = await getBoundUser(env, ROLE_QA_KEY);
-  if (!qa) return null;
-  if (!currentAcceptorIds.includes(qa.openId)) {
-    await markRecentSelfAction(env, recordId, "set_acceptor");
-    await updateTaskAcceptor(env, token, recordId, qa.openId);
+// Notify the right person when a task enters an acceptance stage.
+// Role-based stages (美术验收, 转测试): use the bound role user + QA notice format for 转测试.
+// Other stages: notify whoever is in the acceptor field using review notice.
+async function notifyForStage(env: Env, stage: string, recordId: string, record: any): Promise<void> {
+  const roleKey = STAGE_ROLE[stage];
+  if (roleKey) {
+    const roleUser = await getBoundUser(env, roleKey);
+    if (!roleUser) return;
+    const noticeKind = roleKey === ROLE_QA_KEY ? "qa" : "review";
+    const noticeText = roleKey === ROLE_QA_KEY ? formatQaNotice(record) : formatReviewNotice(record);
+    await notifyUsersOnce(env, noticeKind, recordId, [roleUser.openId], noticeText);
+  } else {
+    const acceptorIds = getPersonOpenIds(record.fields?.[FIELD_ACCEPTOR]);
+    await notifyUsersOnce(env, "review", recordId, acceptorIds, formatReviewNotice(record));
   }
-  return qa;
+}
+
+// Auto-assign the bound role user as acceptor when entering a role-based stage.
+// Returns the role user if assigned, null otherwise.
+export async function ensureStageAcceptor(
+  env: Env, token: string, recordId: string, stage: string, currentAcceptorIds: string[],
+): Promise<BoundUser | null> {
+  const roleKey = STAGE_ROLE[stage];
+  if (!roleKey) return null;
+  const roleUser = await getBoundUser(env, roleKey);
+  if (!roleUser) return null;
+  if (!currentAcceptorIds.includes(roleUser.openId)) {
+    await markRecentSelfAction(env, recordId, "set_acceptor");
+    await updateTaskAcceptor(env, token, recordId, roleUser.openId);
+  }
+  return roleUser;
 }
 
 export async function handleDoneTask(env: Env, chatId: string, senderOpenId: string, taskId: string): Promise<void> {
@@ -60,47 +83,51 @@ export async function handleAcceptancePass(env: Env, chatId: string, taskId: str
   const record = await searchTaskByTaskId(env, token, taskId);
   if (!record) { await replyText(env, chatId, `未找到任务：${taskId}`); return; }
 
-  const type = normalizeValue(record.fields?.[FIELD_TYPE]);
+  const taskType = normalizeValue(record.fields?.[FIELD_TYPE]);
   const oldStatus = normalizeValue(record.fields?.[FIELD_STATUS]);
 
-  if (oldStatus === "下游验收") {
-    if (type === "客户端") {
-      const artReviewer = await getBoundUser(env, ROLE_ART_REVIEWER_KEY);
-      if (!artReviewer) { await replyText(env, chatId, "还没有绑定美术验收人，请先发送：绑定美术验收人 @某人"); return; }
-      await markRecentSelfAction(env, record.record_id, "status:美术验收");
-      await markRecentSelfAction(env, record.record_id, "set_acceptor");
-      await updateTaskFields(env, token, record.record_id, { [FIELD_STATUS]: "美术验收", [FIELD_ACCEPTOR]: [{ id: artReviewer.openId }] });
-      const updated = await getTaskByRecordId(env, token, record.record_id);
-      if (updated) await notifyUsersOnce(env, "review", record.record_id, [artReviewer.openId], formatReviewNotice(updated));
-      await replyText(env, chatId, `已更新：${taskId}\n开发状态：下游验收 → 美术验收\n验收人：${artReviewer.name}`);
+  if (!isAcceptanceStage(taskType, oldStatus)) {
+    await replyText(env, chatId, "这个单子还没到验收状态。");
+    return;
+  }
+
+  const nextStage = getNextStage(taskType, oldStatus);
+  if (!nextStage) {
+    await replyText(env, chatId, "已是最终状态，无法继续。");
+    return;
+  }
+
+  // Check role binding before doing anything, so we don't leave the task in a broken state.
+  const roleKey = STAGE_ROLE[nextStage];
+  let roleUser: BoundUser | null = null;
+  if (roleKey) {
+    roleUser = await getBoundUser(env, roleKey);
+    if (!roleUser) {
+      const roleName = ROLE_DISPLAY_NAMES[roleKey] ?? roleKey;
+      await replyText(env, chatId, `还没有绑定${roleName}，请先发送：绑定${roleName} @某人`);
       return;
     }
-    await markRecentSelfAction(env, record.record_id, "status:已完成");
-    await updateTaskStatus(env, token, record.record_id, "已完成");
-    await replyText(env, chatId, `已更新：${taskId}\n开发状态：下游验收 → 已完成`);
-    return;
   }
 
-  if (oldStatus === "美术验收") {
-    const qa = await getBoundUser(env, ROLE_QA_KEY);
-    if (!qa) { await replyText(env, chatId, "还没有绑定 QA，请先发送：绑定QA @某人"); return; }
-    await markRecentSelfAction(env, record.record_id, "status:转测试");
+  // Transition the task.
+  await markRecentSelfAction(env, record.record_id, `status:${nextStage}`);
+  if (roleUser) {
     await markRecentSelfAction(env, record.record_id, "set_acceptor");
-    await updateTaskFields(env, token, record.record_id, { [FIELD_STATUS]: "转测试", [FIELD_ACCEPTOR]: [{ id: qa.openId }] });
+    await updateTaskFields(env, token, record.record_id, {
+      [FIELD_STATUS]: nextStage,
+      [FIELD_ACCEPTOR]: [{ id: roleUser.openId }],
+    });
+  } else {
+    await updateTaskStatus(env, token, record.record_id, nextStage);
+  }
+
+  if (nextStage !== "已完成") {
     const updated = await getTaskByRecordId(env, token, record.record_id);
-    if (updated) await notifyUsersOnce(env, "qa", record.record_id, [qa.openId], formatQaNotice(updated));
-    await replyText(env, chatId, `已更新：${taskId}\n开发状态：美术验收 → 转测试\n验收人：${qa.name}`);
-    return;
+    if (updated) await notifyForStage(env, nextStage, record.record_id, updated);
   }
 
-  if (oldStatus === "转测试") {
-    await markRecentSelfAction(env, record.record_id, "status:已完成");
-    await updateTaskStatus(env, token, record.record_id, "已完成");
-    await replyText(env, chatId, `已更新：${taskId}\n开发状态：转测试 → 已完成`);
-    return;
-  }
-
-  await replyText(env, chatId, "这个单子还没到验收状态");
+  const suffix = roleUser ? `\n验收人：${roleUser.name}` : "";
+  await replyText(env, chatId, `已更新：${taskId}\n开发状态：${oldStatus} → ${nextStage}${suffix}`);
 }
 
 export async function handleAcceptanceReject(env: Env, chatId: string, taskId: string, reason: string): Promise<void> {
@@ -133,13 +160,21 @@ export async function handleUpdateTaskStatus(env: Env, chatId: string, taskId: s
   await markRecentSelfAction(env, record.record_id, `status:${status}`);
   await updateTaskStatus(env, token, record.record_id, status);
 
-  const updated = await getTaskByRecordId(env, token, record.record_id);
-  if (updated && status === "下游验收") await notifyUsersOnce(env, "review", record.record_id, getPersonOpenIds(updated.fields?.[FIELD_ACCEPTOR]), formatReviewNotice(updated));
-  if (updated && status === "转测试") {
-    const acceptorIds = getPersonOpenIds(updated.fields?.[FIELD_ACCEPTOR]);
-    const qa = await ensureQaAcceptor(env, token, record.record_id, acceptorIds);
-    await notifyUsersOnce(env, "qa", record.record_id, qa ? [qa.openId] : [], formatQaNotice(updated));
-    if (!qa) await replyText(env, chatId, "提醒：还没有绑定 QA，无法自动设置转测试验收人。请先发送：绑定QA @某人");
+  // Auto-assign role and notify if entering a role-based acceptance stage.
+  if (STAGE_ROLE[status]) {
+    const updated = await getTaskByRecordId(env, token, record.record_id);
+    if (updated) {
+      const acceptorIds = getPersonOpenIds(updated.fields?.[FIELD_ACCEPTOR]);
+      const roleUser = await ensureStageAcceptor(env, token, record.record_id, status, acceptorIds);
+      await notifyForStage(env, status, record.record_id, updated);
+      if (!roleUser) {
+        const roleName = ROLE_DISPLAY_NAMES[STAGE_ROLE[status]] ?? STAGE_ROLE[status];
+        await replyText(env, chatId, `提醒：还没有绑定${roleName}，无法自动设置验收人。请先发送：绑定${roleName} @某人`);
+      }
+    }
+  } else if (status === "下游验收") {
+    const updated = await getTaskByRecordId(env, token, record.record_id);
+    if (updated) await notifyUsersOnce(env, "review", record.record_id, getPersonOpenIds(updated.fields?.[FIELD_ACCEPTOR]), formatReviewNotice(updated));
   }
 
   await replyText(env, chatId, `已更新：${taskId}\n开发状态：${oldStatus} → ${status}`);
@@ -195,5 +230,3 @@ export async function handlePendingAcceptorReply(env: Env, chatId: string, sende
   await replyText(env, chatId, `已设置 ${pending.taskId} 的验收人：${userMention.name}`);
   return true;
 }
-
-export { ensureQaAcceptor };
