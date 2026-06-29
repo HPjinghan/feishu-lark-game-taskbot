@@ -1,0 +1,20 @@
+{
+  "name": "feishu-game-taskbot",
+  "compatibility_date": "2026-05-26",
+  "main": "src/index.ts",
+  "vars": {
+    // Lark/Feishu OpenAPI base URL. Default works for most regions.
+    "LARK_API_BASE": "https://open.feishu.cn",
+    // Set to "1" to write debug events to KV (for troubleshooting only — costs KV writes).
+    "DEBUG_EVENTS": "0",
+    // Comma-separated open_ids of admins to alert on critical errors. Leave empty to disable.
+    "ADMIN_OPEN_IDS": ""
+  },
+  "kv_namespaces": [
+    {
+      "binding": "BOT_KV",
+      // Replace with your KV namespace ID after running: wrangler kv namespace create BOT_KV
+      "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+    }
+  ]
+}

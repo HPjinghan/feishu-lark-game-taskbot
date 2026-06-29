@@ -1,0 +1,18 @@
+{
+  "name": "feishu-game-taskbot",
+  "version": "0.1.0",
+  "description": "飞书 × 多维表格游戏团队任务工作流机器人 / Feishu task workflow bot for game teams",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types"
+  },
+  "keywords": ["feishu", "lark", "bitable", "game-dev", "workflow", "cloudflare-workers"],
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.95.0"
+  }
+}
