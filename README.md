@@ -43,9 +43,7 @@
 
 ## 一键部署
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/YOUR_USERNAME/feishu-game-taskbot)
-
-> 替换链接里的 `YOUR_USERNAME` 为你的 GitHub 用户名后，这个按钮就可以用。
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/HPjinghan/feishu-lark-game-taskbot)
 
 ---
 
@@ -61,8 +59,8 @@
 ### 2. 克隆 & 安装
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/feishu-game-taskbot.git
-cd feishu-game-taskbot
+git clone https://github.com/HPjinghan/feishu-lark-game-taskbot.git
+cd feishu-lark-game-taskbot
 npm install
 ```
 
