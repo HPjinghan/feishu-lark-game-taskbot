@@ -105,14 +105,21 @@ export function parseDueDateToMs(dateStr: string): number | null {
     return null;
   }
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  // Anchor at noon (not midnight) Shanghai time: if Bitable renders this
+  // timestamp under a different timezone assumption than +8 (e.g. UTC),
+  // midnight Shanghai converts to 16:00 the PREVIOUS day in UTC, crossing
+  // the date boundary and making every date display one day earlier. Noon
+  // gives a ±12h margin that survives most timezone mismatches while still
+  // only representing "a day", not a meaningful time of day.
+  const hour = 12;
   const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
   if (year === undefined) {
     const nowShanghai = new Date(Date.now() + SHANGHAI_OFFSET_MS);
     year = nowShanghai.getUTCFullYear();
-    const candidate = Date.UTC(year, month - 1, day) - SHANGHAI_OFFSET_MS;
+    const candidate = Date.UTC(year, month - 1, day, hour) - SHANGHAI_OFFSET_MS;
     if (candidate < Date.now() - 24 * 60 * 60 * 1000) year += 1;
   }
-  const ms = Date.UTC(year, month - 1, day) - SHANGHAI_OFFSET_MS;
+  const ms = Date.UTC(year, month - 1, day, hour) - SHANGHAI_OFFSET_MS;
   return Number.isFinite(ms) ? ms : null;
 }
 
