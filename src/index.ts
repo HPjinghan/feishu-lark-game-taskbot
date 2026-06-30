@@ -142,13 +142,21 @@ export default {
         // was mentioned first in the whole message.
         const cmd = parseBatchCreateTaskCommand(text)!;
         const mentionsByKey = getUserMentionsByKey(event);
+        // Mention keys look like "@_user_1", "@_user_2", ... "@_user_30". A naive
+        // substring match is unsafe once there are 10+ mentions: "@_user_1" is a
+        // literal prefix of "@_user_16", so .includes()/.replace() would wrongly
+        // match the short key inside the long one, strip only the prefix, leave
+        // the trailing digit(s) stuck to the title, AND attribute the line to the
+        // wrong (shorter-keyed) person. Require the key not be followed by another
+        // digit so "@_user_1" can never match inside "@_user_16".
         const lines: BatchTaskLine[] = cmd.titles.map((rawLine) => {
           let lineOwner = null as ReturnType<typeof getFirstUserMention>;
           let cleanedTitle = rawLine;
           for (const [key, user] of mentionsByKey) {
-            if (cleanedTitle.includes(key)) {
+            const keyPattern = new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?!\\d)");
+            if (keyPattern.test(cleanedTitle)) {
               lineOwner = user;
-              cleanedTitle = cleanedTitle.replace(key, "").trim();
+              cleanedTitle = cleanedTitle.replace(keyPattern, "").trim();
             }
           }
           return { rawTitle: cleanedTitle, lineOwner };
