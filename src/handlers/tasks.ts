@@ -47,17 +47,31 @@ export async function handleCreateTask(env: Env, chatId: string, title: string, 
   ].filter(Boolean).join("\n"));
 }
 
-export async function handleBatchCreateTasks(env: Env, chatId: string, titles: string[], owner: BoundUser | null): Promise<void> {
+export interface BatchTaskLine {
+  rawTitle: string;
+  // Owner for this specific line, if it had its own @mention. Null means
+  // "use the batch-level default owner" (e.g. a single @mention at the end
+  // of the whole command applying to every line).
+  lineOwner: BoundUser | null;
+}
+
+export async function handleBatchCreateTasks(
+  env: Env,
+  chatId: string,
+  lines: BatchTaskLine[],
+  defaultOwner: BoundUser | null,
+): Promise<void> {
   const token = await getTenantAccessToken(env);
   let optionsByField: Record<string, string[]> = {};
   try { optionsByField = await getSelectOptionsByFieldName(env, token); } catch (e: any) { console.error("Failed to load field options:", e?.message || e); }
 
-  const tasks = titles.map((t) => parseTaskDraftSmart(t, optionsByField));
   const created: string[] = [];
   const skipped: string[] = [];
   const failed: string[] = [];
 
-  for (const task of tasks) {
+  for (const line of lines) {
+    const task = parseTaskDraftSmart(line.rawTitle, optionsByField);
+    const owner = line.lineOwner ?? defaultOwner;
     try {
       const existing = await searchTaskByTitleAndType(env, token, task.title, task.type, task.module || "", task.version || "");
       if (existing) {
@@ -67,14 +81,15 @@ export async function handleBatchCreateTasks(env: Env, chatId: string, titles: s
       }
       const record = await createTask(env, token, task.title, owner?.openId || "", task.type, task.module || "", task.version || "", task.dueDate, task.startDate);
       const taskId = normalizeValue(record?.fields?.["TaskID"]);
-      created.push(`${taskId !== "-" ? `${taskId} ` : ""}${task.title}${formatDraftTags(task)}`);
+      const ownerTag = owner ? ` @${owner.name}` : "";
+      created.push(`${taskId !== "-" ? `${taskId} ` : ""}${task.title}${formatDraftTags(task)}${ownerTag}`);
     } catch (e: any) {
       failed.push(`${task.title}：${e?.message || e}`);
     }
   }
 
   await replyText(env, chatId, [
-    `已创建 ${created.length} 个任务${owner ? `，人员：${owner.name}` : ""}`,
+    `已创建 ${created.length} 个任务`,
     ...created.map((item) => `- ${item}`),
     skipped.length > 0 ? `\n已存在，跳过 ${skipped.length} 个：` : "",
     ...skipped.map((item) => `- ${item}`),

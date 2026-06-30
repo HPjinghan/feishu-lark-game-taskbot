@@ -1,10 +1,10 @@
 import type { Env } from "./types";
-import { getEventType, getEventId, getMessageId, getChatId, getSenderOpenId, getFirstUserMention, getUserMentions, extractText, removeBotMention, removeUserMentions, isPrivateChat, hasBotMention, hasAnyMention } from "./lark/events";
+import { getEventType, getEventId, getMessageId, getChatId, getSenderOpenId, getFirstUserMention, getUserMentions, getUserMentionsByKey, extractText, removeBotMention, removeUserMentions, isPrivateChat, hasBotMention, hasAnyMention } from "./lark/events";
 import { replyText } from "./lark/message";
 import { shouldSkipDuplicateEventKeys, shouldSkipDuplicateCommand } from "./utils/dedupe";
 import { alertAdminsOnce } from "./utils/notify";
 import { handleSlashCommand, handleHelp, handleHealthCheck, handleLastBitableEventDebug, handleLastDriveEventDebug } from "./handlers/commands";
-import { handleShowTask, handleMyTasks, handleAcceptanceTasks, handleCreateTask, handleBatchCreateTasks } from "./handlers/tasks";
+import { handleShowTask, handleMyTasks, handleAcceptanceTasks, handleCreateTask, handleBatchCreateTasks, type BatchTaskLine } from "./handlers/tasks";
 import { handleDoneTask, handleAcceptancePass, handleAcceptanceReject, handleUpdateTaskStatus, handleModifyTask, handleBindRole, handlePendingAcceptorReply } from "./handlers/workflow";
 import { handleBitableRecordChanged, saveDriveEventDebug } from "./handlers/bitable-event";
 import { subscribeBitableEvents, getBitableFileTokenForDrive } from "./bitable/fields";
@@ -134,12 +134,36 @@ export default {
       } else if (parseCreateTaskCommand(removeUserMentions(text, event))) {
         const cmd = parseCreateTaskCommand(removeUserMentions(text, event))!;
         await handleCreateTask(env, chatId, cmd.title, userMention);
-      } else if (parseBatchCreateTaskCommand(removeUserMentions(text, event))) {
-        const cmd = parseBatchCreateTaskCommand(removeUserMentions(text, event))!;
-        if (await shouldSkipDuplicateCommand(env, "batch_create", { chatId, ownerOpenId: userMention?.openId || "", tasks: cmd.titles })) {
+      } else if (parseBatchCreateTaskCommand(text)) {
+        // Important: do NOT strip user mentions from `text` before this point —
+        // each line can carry its own @mention (e.g. one person per row in a
+        // schedule import), and we need the mention keys intact to tell them apart.
+        // getFirstUserMention() alone would wrongly assign every line to whoever
+        // was mentioned first in the whole message.
+        const cmd = parseBatchCreateTaskCommand(text)!;
+        const mentionsByKey = getUserMentionsByKey(event);
+        const lines: BatchTaskLine[] = cmd.titles.map((rawLine) => {
+          let lineOwner = null as ReturnType<typeof getFirstUserMention>;
+          let cleanedTitle = rawLine;
+          for (const [key, user] of mentionsByKey) {
+            if (cleanedTitle.includes(key)) {
+              lineOwner = user;
+              cleanedTitle = cleanedTitle.replace(key, "").trim();
+            }
+          }
+          return { rawTitle: cleanedTitle, lineOwner };
+        });
+
+        if (
+          await shouldSkipDuplicateCommand(env, "batch_create", {
+            chatId,
+            defaultOwnerOpenId: userMention?.openId || "",
+            lines: lines.map((l) => ({ title: l.rawTitle, ownerOpenId: l.lineOwner?.openId || "" })),
+          })
+        ) {
           return new Response("OK");
         }
-        ctx.waitUntil(handleBatchCreateTasks(env, chatId, cmd.titles, userMention));
+        ctx.waitUntil(handleBatchCreateTasks(env, chatId, lines, userMention));
         return new Response("OK");
       } else if (isAcceptanceTaskQuery(text)) {
         await handleAcceptanceTasks(env, chatId, senderOpenId);

@@ -76,6 +76,25 @@ export function getUserMentions(event: any): BoundUser[] {
   return users;
 }
 
+// Maps each mention's placeholder key (e.g. "@_user_1") in the raw message text
+// to the user it refers to. Needed to tell apart per-line @mentions in a
+// multi-line message (e.g. batch create), where getFirstUserMention() alone
+// can't distinguish which line each @ belongs to.
+export function getUserMentionsByKey(event: any): Map<string, BoundUser> {
+  const mentions = event?.message?.mentions || [];
+  const map = new Map<string, BoundUser>();
+  for (const mention of mentions) {
+    if (mention?.mentioned_type !== "user" || !mention?.key) continue;
+    const openId =
+      mention?.id?.open_id || mention?.open_id ||
+      mention?.id?.user_id || mention?.user_id ||
+      mention?.id?.union_id || mention?.union_id || "";
+    if (!openId) continue;
+    map.set(mention.key, { openId, name: mention?.name || "对方" });
+  }
+  return map;
+}
+
 export function getEventType(body: any): string {
   return body?.header?.event_type || body?.event_type || body?.type || "";
 }
