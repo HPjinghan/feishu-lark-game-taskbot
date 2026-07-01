@@ -133,6 +133,21 @@ function isVersionToken(token: string): boolean {
   return /^[vV]\d+(\.\d+)*$/.test(token);
 }
 
+// Strips a trailing exact match of `type` from a title to recover the
+// underlying feature name — e.g. "月卡客户端" with type "客户端" -> "月卡".
+// This is the "same feature, different type" grouping signal used to gate
+// task ordering (客户端 waits on UI/策划案): the team's shorthand convention
+// glues the feature name and type together with no separator, so two tasks
+// are "the same feature" when this extracted name matches exactly — no 模块
+// field required.
+export function extractFeatureName(title: string, type: string): string {
+  const trimmed = title.trim();
+  if (type && trimmed.endsWith(type) && trimmed.length > type.length) {
+    return trimmed.slice(0, trimmed.length - type.length).trim();
+  }
+  return trimmed;
+}
+
 export function parseDueDateToMs(dateStr: string): number | null {
   const ds = dateStr.trim();
   let year: number | undefined;

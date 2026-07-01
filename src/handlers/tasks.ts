@@ -1,28 +1,34 @@
 import type { Env, BoundUser, TaskDraft } from "../types";
 import { getTenantAccessToken } from "../lark/auth";
 import { replyText } from "../lark/message";
-import { searchTaskByTaskId, searchTaskByTitleAndType, searchTasksByOwnerOpenId, searchActiveTasksByOwnerOpenId, searchTasksByModuleAndType, searchTasksByAcceptorOpenId, createTask } from "../bitable/records";
+import { searchTaskByTaskId, searchTaskByTitleAndType, searchTasksByOwnerOpenId, searchActiveTasksByOwnerOpenId, searchTasksByType, searchTasksByAcceptorOpenId, createTask } from "../bitable/records";
 import { getSelectOptionsByFieldName } from "../bitable/fields";
 import { normalizeValue, formatTask, formatMyTasks, formatAcceptanceTasks, formatDraftTags } from "../utils/format";
-import { parseTaskDraftSmart } from "../utils/parse";
+import { parseTaskDraftSmart, extractFeatureName } from "../utils/parse";
 import { resolveOwnerNextFreeDay, addWorkdays, nextWorkday, DAY_MS } from "../utils/workday";
-import { FIELD_DUE_DATE, FIELD_STATUS, TYPE_PREREQUISITES } from "../config";
+import { FIELD_DUE_DATE, FIELD_STATUS, FIELD_TITLE, TYPE_PREREQUISITES } from "../config";
 
 // If this task's type has prerequisite types (客户端 needs UI + 策划/运营,
-// per TYPE_PREREQUISITES) and the task has a 模块, checks whether any
-// not-yet-finished task of a prerequisite type exists under the same 模块 —
-// the only reliable "same feature" signal a single ad-hoc 创建任务 command
-// has, since it isn't going through the structured 排期 breakdown. Returns
-// the latest such blocking due date, or null if nothing is gating this task
-// (no module given, or no matching prerequisite task found).
+// per TYPE_PREREQUISITES), checks whether any not-yet-finished task of a
+// prerequisite type exists for the SAME FEATURE — matched by stripping each
+// task's own type off its title (extractFeatureName) and comparing the
+// remainder exactly, e.g. "月卡客户端" and "月卡UI" both reduce to "月卡".
+// No 模块 field required. Returns the latest such blocking due date, or null
+// if nothing is gating this task.
 async function resolvePrerequisiteGateDate(env: Env, token: string, task: TaskDraft): Promise<number | null> {
   const prereqTypes = TYPE_PREREQUISITES[task.type] || [];
-  if (prereqTypes.length === 0 || !task.module) return null;
+  if (prereqTypes.length === 0) return null;
+
+  const featureName = extractFeatureName(task.title, task.type);
+  if (!featureName) return null;
 
   let latestDue: number | null = null;
   for (const prereqType of prereqTypes) {
-    const matches = await searchTasksByModuleAndType(env, token, task.module, prereqType);
-    for (const record of matches) {
+    const candidates = await searchTasksByType(env, token, prereqType);
+    for (const record of candidates) {
+      const candidateTitle = normalizeValue(record.fields?.[FIELD_TITLE]);
+      if (extractFeatureName(candidateTitle, prereqType) !== featureName) continue;
+
       const status = normalizeValue(record.fields?.[FIELD_STATUS]);
       const due = record.fields?.[FIELD_DUE_DATE];
       if (status === "已完成" || typeof due !== "number") continue;
@@ -35,7 +41,7 @@ async function resolvePrerequisiteGateDate(env: Env, token: string, task: TaskDr
 // Turns a bare "N天" duration into real start/due dates. Two things can push
 // the start date later than "tomorrow":
 //   1. the owner's own existing workload (resolveOwnerNextFreeDay)
-//   2. an unfinished prerequisite-type task under the same 模块 (客户端 must
+//   2. an unfinished prerequisite-type task for the same feature (客户端 must
 //      wait on UI/策划案, per TYPE_PREREQUISITES) — whichever constraint is
 //      later wins
 // If the input already gave an explicit date (task.dueDate is set), this is

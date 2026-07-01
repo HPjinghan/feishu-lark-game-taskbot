@@ -1,15 +1,15 @@
 import type { Env, BoundUser } from "../types";
 import { getTenantAccessToken } from "../lark/auth";
 import { replyText } from "../lark/message";
-import { createTask } from "../bitable/records";
+import { createTask, searchTasksByType } from "../bitable/records";
 import { normalizeValue, formatDateOnly } from "../utils/format";
-import { resolveScheduleWindow } from "../utils/parse";
+import { resolveScheduleWindow, extractFeatureName } from "../utils/parse";
 import { findUserByName } from "../utils/directory";
 import { scheduleTasks, type SchedulableTask } from "../utils/workday";
 import { isLlmConfigured } from "../llm/provider";
 import { extractFeatureUnits, estimateDurations } from "../llm/schedule";
 import { kvGet, kvPut, kvDelete } from "../kv";
-import { TYPE_PREREQUISITES, SCHEDULE_SESSION_TTL_SECONDS } from "../config";
+import { TYPE_PREREQUISITES, SCHEDULE_SESSION_TTL_SECONDS, FIELD_TITLE, FIELD_STATUS } from "../config";
 
 // ─── Session state (multi-turn: ask about missing durations, then confirm) ──
 
@@ -70,25 +70,49 @@ function flattenTypeChain(type: string): string[] {
   return ordered;
 }
 
-function buildSubtasksForFeature(
+// Checks whether an already-FINISHED task for this feature+type exists —
+// matched by extractFeatureName (strip the type off the title, compare
+// exactly), the same "same feature" signal used in handlers/tasks.ts for
+// single ad-hoc task creation. If it's already done, there's no reason to
+// generate a duplicate prerequisite subtask for it.
+async function isStageAlreadyDone(env: Env, token: string, featureName: string, stageType: string): Promise<boolean> {
+  const candidates = await searchTasksByType(env, token, stageType);
+  return candidates.some((record: any) => {
+    const candidateTitle = normalizeValue(record.fields?.[FIELD_TITLE]);
+    if (extractFeatureName(candidateTitle, stageType) !== featureName) return false;
+    return normalizeValue(record.fields?.[FIELD_STATUS]) === "已完成";
+  });
+}
+
+async function buildSubtasksForFeature(
+  env: Env,
+  token: string,
   featureName: string,
   type: string | null,
   ownerText: string | null,
   durationDays: number | null,
   idCounter: { n: number },
-): DraftSubtask[] {
+): Promise<DraftSubtask[]> {
   const leafType = type || "default";
   const chain = flattenTypeChain(leafType);
 
   const subtasks: DraftSubtask[] = [];
   let prevId: string | undefined;
   for (const t of chain) {
-    const id = `t${idCounter.n++}`;
     const isLeaf = t === leafType;
+    const stageType = t === "default" ? (type || "") : t;
+
+    // Non-leaf (prerequisite) stages: skip generating a duplicate if this
+    // feature already has a finished task of this type. Note: an UNFINISHED
+    // match isn't gated against here — this only avoids recreating done
+    // work, it doesn't yet pin the new chain to an external task's due date.
+    if (!isLeaf && (await isStageAlreadyDone(env, token, featureName, stageType))) continue;
+
+    const id = `t${idCounter.n++}`;
     subtasks.push({
       id,
       title: isLeaf ? featureName : `${featureName}${t}`,
-      type: t === "default" ? (type || "") : t,
+      type: stageType,
       ownerText: isLeaf ? ownerText : null,
       durationDays: isLeaf ? durationDays : null,
       dependsOn: prevId ? [prevId] : [],
@@ -207,8 +231,12 @@ export async function handleScheduleCommand(env: Env, chatId: string, senderOpen
   }
 
   const window = resolveScheduleWindow(description);
+  const token = await getTenantAccessToken(env);
   const idCounter = { n: 0 };
-  const subtasks = units.flatMap((u) => buildSubtasksForFeature(u.featureName, u.type, u.ownerText, u.durationDays, idCounter));
+  const subtasks: DraftSubtask[] = [];
+  for (const u of units) {
+    subtasks.push(...(await buildSubtasksForFeature(env, token, u.featureName, u.type, u.ownerText, u.durationDays, idCounter)));
+  }
 
   const missing = subtasks.filter((s) => s.durationDays === null);
   if (missing.length > 0) {
