@@ -8,7 +8,16 @@
     // Set to "1" to write debug events to KV (for troubleshooting only — costs KV writes).
     "DEBUG_EVENTS": "0",
     // Comma-separated open_ids of admins to alert on critical errors. Leave empty to disable.
-    "ADMIN_OPEN_IDS": ""
+    "ADMIN_OPEN_IDS": "",
+    // Optional — only used by the auto-scheduler's LLM-assisted steps (task
+    // breakdown, duration estimation). Leave LLM_API_KEY unset (don't add it
+    // here — put it in `wrangler secret put LLM_API_KEY` instead) to run the
+    // bot with zero LLM dependency. "anthropic" | "openai" | "openai-compatible".
+    "LLM_PROVIDER": "anthropic",
+    // Override only if you're pointing at a non-default region/self-hosted/
+    // OpenAI-compatible endpoint (DeepSeek, Moonshot/Kimi, vLLM, etc).
+    "LLM_BASE_URL": "",
+    "LLM_MODEL": ""
   },
   "kv_namespaces": [
     {
