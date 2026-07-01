@@ -3,7 +3,7 @@ import { TYPE_PREREQUISITES } from "../config";
 // All scheduling math anchors on noon (12:00) Asia/Shanghai, matching the
 // convention in utils/parse.ts's parseDueDateToMs — see the comment there for
 // why noon (not midnight) is used to dodge timezone-display bugs.
-const DAY_MS = 24 * 60 * 60 * 1000;
+export const DAY_MS = 24 * 60 * 60 * 1000;
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 function shanghaiWeekday(ms: number): number {

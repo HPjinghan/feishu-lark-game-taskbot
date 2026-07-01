@@ -56,6 +56,19 @@ export async function searchTasksByOwnerOpenId(env: Env, token: string, ownerOpe
   return searchTasksByPersonOpenId(env, token, FIELD_OWNER, ownerOpenId, MY_TASK_STATUSES);
 }
 
+// Used for dependency-gating: "does this module already have a not-yet-done
+// task of this (prerequisite) type?" — e.g. checking for an unfinished UI or
+// 策划案 task under the same 模块 before letting a 客户端 task start.
+export async function searchTasksByModuleAndType(env: Env, token: string, module: string, type: string): Promise<any[]> {
+  return searchRecords(env, token, {
+    conjunction: "and",
+    conditions: [
+      { field_name: FIELD_MODULE, operator: "is", value: [module] },
+      { field_name: FIELD_TYPE, operator: "is", value: [type] },
+    ],
+  }, 50);
+}
+
 const FINISHED_STATUSES = ["已完成", "已停滞"];
 
 // Unlike searchTasksByOwnerOpenId (which only matches the narrow "todo"

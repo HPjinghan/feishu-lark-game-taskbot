@@ -1,17 +1,45 @@
 import type { Env, BoundUser, TaskDraft } from "../types";
 import { getTenantAccessToken } from "../lark/auth";
 import { replyText } from "../lark/message";
-import { searchTaskByTaskId, searchTaskByTitleAndType, searchTasksByOwnerOpenId, searchActiveTasksByOwnerOpenId, searchTasksByAcceptorOpenId, createTask } from "../bitable/records";
+import { searchTaskByTaskId, searchTaskByTitleAndType, searchTasksByOwnerOpenId, searchActiveTasksByOwnerOpenId, searchTasksByModuleAndType, searchTasksByAcceptorOpenId, createTask } from "../bitable/records";
 import { getSelectOptionsByFieldName } from "../bitable/fields";
 import { normalizeValue, formatTask, formatMyTasks, formatAcceptanceTasks, formatDraftTags } from "../utils/format";
 import { parseTaskDraftSmart } from "../utils/parse";
-import { resolveOwnerNextFreeDay, addWorkdays } from "../utils/workday";
-import { FIELD_DUE_DATE } from "../config";
+import { resolveOwnerNextFreeDay, addWorkdays, nextWorkday, DAY_MS } from "../utils/workday";
+import { FIELD_DUE_DATE, FIELD_STATUS, TYPE_PREREQUISITES } from "../config";
 
-// Turns a bare "N天" duration into real start/due dates, accounting for the
-// owner's EXISTING workload — not just "tomorrow, blindly". If the input
-// already gave an explicit date (task.dueDate is set), this is a no-op:
-// an explicit date always wins over a duration guess.
+// If this task's type has prerequisite types (客户端 needs UI + 策划/运营,
+// per TYPE_PREREQUISITES) and the task has a 模块, checks whether any
+// not-yet-finished task of a prerequisite type exists under the same 模块 —
+// the only reliable "same feature" signal a single ad-hoc 创建任务 command
+// has, since it isn't going through the structured 排期 breakdown. Returns
+// the latest such blocking due date, or null if nothing is gating this task
+// (no module given, or no matching prerequisite task found).
+async function resolvePrerequisiteGateDate(env: Env, token: string, task: TaskDraft): Promise<number | null> {
+  const prereqTypes = TYPE_PREREQUISITES[task.type] || [];
+  if (prereqTypes.length === 0 || !task.module) return null;
+
+  let latestDue: number | null = null;
+  for (const prereqType of prereqTypes) {
+    const matches = await searchTasksByModuleAndType(env, token, task.module, prereqType);
+    for (const record of matches) {
+      const status = normalizeValue(record.fields?.[FIELD_STATUS]);
+      const due = record.fields?.[FIELD_DUE_DATE];
+      if (status === "已完成" || typeof due !== "number") continue;
+      if (latestDue === null || due > latestDue) latestDue = due;
+    }
+  }
+  return latestDue;
+}
+
+// Turns a bare "N天" duration into real start/due dates. Two things can push
+// the start date later than "tomorrow":
+//   1. the owner's own existing workload (resolveOwnerNextFreeDay)
+//   2. an unfinished prerequisite-type task under the same 模块 (客户端 must
+//      wait on UI/策划案, per TYPE_PREREQUISITES) — whichever constraint is
+//      later wins
+// If the input already gave an explicit date (task.dueDate is set), this is
+// a no-op: an explicit date always wins over a duration guess.
 async function resolveDurationDates(env: Env, token: string, task: TaskDraft, ownerOpenId?: string): Promise<void> {
   if (task.dueDate !== undefined || !task.durationDays) return;
 
@@ -22,8 +50,13 @@ async function resolveDurationDates(env: Env, token: string, task: TaskDraft, ow
       .map((r: any) => r.fields?.[FIELD_DUE_DATE])
       .filter((v: any): v is number => typeof v === "number");
   }
+  const ownerFreeDay = resolveOwnerNextFreeDay(existingDueDates);
 
-  const start = resolveOwnerNextFreeDay(existingDueDates);
+  const prereqGateDate = await resolvePrerequisiteGateDate(env, token, task);
+  const start = prereqGateDate !== null
+    ? nextWorkday(Math.max(ownerFreeDay, prereqGateDate + DAY_MS))
+    : ownerFreeDay;
+
   task.startDate = start;
   task.dueDate = addWorkdays(start, task.durationDays - 1);
 }
