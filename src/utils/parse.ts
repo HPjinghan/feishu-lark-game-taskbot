@@ -65,6 +65,48 @@ export function parseBindRoleCommand(text: string): { roleName: string } | null 
   return match ? { roleName: match[1] } : null;
 }
 
+// Entry point for the auto-scheduler: "排期 <随便怎么写的需求描述>"
+export function parseScheduleCommand(text: string): { description: string } | null {
+  const match = text.trim().match(/^排期\s*([\s\S]+)$/);
+  if (!match) return null;
+  const description = match[1].trim();
+  return description ? { description } : null;
+}
+
+// Resolves a scheduling time window from free text. Only handles two cases —
+// anything genuinely more complex than "an explicit range" or "just a bare
+// month" should stay unresolved rather than guessed.
+//   - explicit range: "3.1-3.30", "3月1日至3月30日", etc (delegates to parseDateRange)
+//   - bare month, no day: "3月" -> the WHOLE month, per team policy (no need to ask)
+export function resolveScheduleWindow(text: string): { start: number; end: number } | null {
+  const rangeMatch = text.match(/\d{1,2}[.\/\-月]\d{1,2}日?\s*(?:[-~～]|到|至)\s*\d{1,2}[.\/\-月]\d{1,2}日?/);
+  if (rangeMatch) {
+    const range = parseDateRange(rangeMatch[0]);
+    if (range && range.start !== null) return { start: range.start, end: range.due };
+  }
+
+  const monthOnly = text.match(/(\d{1,2})月(?!\d)/);
+  if (monthOnly) {
+    const month = Number(monthOnly[1]);
+    if (month >= 1 && month <= 12) {
+      const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+      const nowShanghai = new Date(Date.now() + SHANGHAI_OFFSET_MS);
+      let year = nowShanghai.getUTCFullYear();
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      let end = Date.UTC(year, month - 1, lastDay, 12) - SHANGHAI_OFFSET_MS;
+      if (end < Date.now() - 24 * 60 * 60 * 1000) {
+        year += 1;
+        const lastDayNextYear = new Date(Date.UTC(year, month, 0)).getUTCDate();
+        end = Date.UTC(year, month - 1, lastDayNextYear, 12) - SHANGHAI_OFFSET_MS;
+      }
+      const start = Date.UTC(year, month - 1, 1, 12) - SHANGHAI_OFFSET_MS;
+      return { start, end };
+    }
+  }
+
+  return null;
+}
+
 export function parseCreateTaskCommand(text: string): { title: string } | null {
   const match = text.trim().match(/^创建任务\s*(.+)$/);
   if (!match) return null;

@@ -16,7 +16,11 @@ import {
   parseCreateTaskCommand, parseBatchCreateTaskCommand, parseModifyCommand,
   parseBindRoleCommand, parseDoneCommand, parseAcceptanceRejectCommand,
   parseAcceptancePassCommand, parseSimpleStatusCommand, parseSimpleShowCommand,
+  parseScheduleCommand,
 } from "./utils/parse";
+import {
+  handleScheduleCommand, handleScheduleConfirm, handleScheduleDurationReply, isScheduleConfirmReply,
+} from "./handlers/schedule";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -136,8 +140,21 @@ export default {
         } catch (e: any) {
           await replyText(env, chatId, `拉群失败：${e?.message || e}`);
         }
+      } else if (isScheduleConfirmReply(text) && (await handleScheduleConfirm(env, chatId, senderOpenId))) {
+        // handled — a pending schedule draft existed and got created
+      } else if (await handleScheduleDurationReply(env, chatId, senderOpenId, text)) {
+        // handled — this was a reply to "还差这些工时" for a pending schedule session
       } else if (await handlePendingAcceptorReply(env, chatId, senderOpenId, userMention)) {
         // handled
+      } else if (parseScheduleCommand(text)) {
+        const cmd = parseScheduleCommand(text)!;
+        // LLM calls have real latency — ack immediately, run in background,
+        // matching the same pattern as batch-create.
+        if (await shouldSkipDuplicateCommand(env, "schedule", { chatId, senderOpenId, description: cmd.description })) {
+          return new Response("OK");
+        }
+        ctx.waitUntil(handleScheduleCommand(env, chatId, senderOpenId, cmd.description));
+        return new Response("OK");
       } else if (parseCreateTaskCommand(removeUserMentions(text, event))) {
         const cmd = parseCreateTaskCommand(removeUserMentions(text, event))!;
         await handleCreateTask(env, chatId, cmd.title, userMention);

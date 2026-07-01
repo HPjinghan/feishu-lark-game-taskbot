@@ -135,6 +135,7 @@ export const LAST_DRIVE_EVENT_KEY = "debug:last_drive_event";
 
 // TTLs in seconds.
 export const PENDING_ACCEPTOR_TTL_SECONDS = 10 * 60;
+export const SCHEDULE_SESSION_TTL_SECONDS = 30 * 60;
 export const FIELD_MAP_TTL_SECONDS = 24 * 60 * 60;
 export const RECENT_SELF_ACTION_TTL_SECONDS = 2 * 60;
 export const NOTIFICATION_DEDUPE_TTL_SECONDS = 5 * 60;
