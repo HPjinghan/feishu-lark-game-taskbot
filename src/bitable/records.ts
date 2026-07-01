@@ -69,7 +69,7 @@ export async function getTaskByRecordId(env: Env, token: string, recordId: strin
 }
 
 export async function createTask(
-  env: Env, token: string, title: string, ownerOpenId = "",
+  env: Env, token: string, title: string, owner: string | string[] = "",
   type = "", module = "", version = "", dueDate?: number, startDate?: number,
 ): Promise<any> {
   const url = `${env.LARK_API_BASE}/open-apis/bitable/v1/apps/${env.BITABLE_APP_TOKEN}/tables/${env.TASK_TABLE_ID}/records?user_id_type=open_id`;
@@ -79,7 +79,10 @@ export async function createTask(
   if (version) fields[FIELD_VERSION] = version;
   if (typeof startDate === "number") fields[FIELD_START_DATE] = startDate;
   if (typeof dueDate === "number") fields[FIELD_DUE_DATE] = dueDate;
-  if (ownerOpenId) fields[FIELD_OWNER] = [{ id: ownerOpenId }];
+  // A task can have more than one owner (e.g. a feature jointly done by two
+  // people) — accepts either a single open_id (existing callers) or a list.
+  const ownerIds = (Array.isArray(owner) ? owner : [owner]).filter(Boolean);
+  if (ownerIds.length > 0) fields[FIELD_OWNER] = ownerIds.map((id) => ({ id }));
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json; charset=utf-8", Authorization: `Bearer ${token}` },

@@ -3,6 +3,7 @@ import { getEventType, getEventId, getMessageId, getChatId, getSenderOpenId, get
 import { replyText } from "./lark/message";
 import { shouldSkipDuplicateEventKeys, shouldSkipDuplicateCommand } from "./utils/dedupe";
 import { alertAdminsOnce } from "./utils/notify";
+import { recordUsersSeen } from "./utils/directory";
 import { handleSlashCommand, handleHelp, handleHealthCheck, handleLastBitableEventDebug, handleLastDriveEventDebug } from "./handlers/commands";
 import { handleShowTask, handleMyTasks, handleAcceptanceTasks, handleCreateTask, handleBatchCreateTasks, type BatchTaskLine } from "./handlers/tasks";
 import { handleDoneTask, handleAcceptancePass, handleAcceptanceReject, handleUpdateTaskStatus, handleModifyTask, handleBindRole, handlePendingAcceptorReply } from "./handlers/workflow";
@@ -56,6 +57,12 @@ export default {
       const userMentions = getUserMentions(event);
       let text = extractText(event);
       const rawText = text;
+
+      // Passive directory building: every real @mention seen in ANY message
+      // (not just scheduling commands) gets remembered as name -> open_id, so
+      // fuzzy name lookup (e.g. "客户端给张三" typed with no @) gets more
+      // reliable the more the team uses the bot normally. Non-blocking.
+      ctx.waitUntil(recordUsersSeen(env, userMentions));
 
       const shouldHandle =
         isPrivateChat(event) ||
