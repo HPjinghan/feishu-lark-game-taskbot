@@ -93,6 +93,31 @@ export function isAcceptanceStage(taskType: string, status: string): boolean {
 
 // ────────────────────────────────────────────────────────────────────────────
 
+// ─── Scheduling: dependency rules ────────────────────────────────────────────
+//
+// Deterministic prerequisite rules for the auto-scheduler ("排期机器人").
+// These are settled facts about how your team works, not something the LLM
+// should guess at — e.g. "client work always waits on UI + design doc" is a
+// constant, not a judgment call. Only types NOT covered here (or ambiguous
+// participation, see below) fall through to LLM reasoning or a direct question
+// to the user.
+//
+// Map: task type -> list of task types that must be done first, if present
+// in the same batch. A prerequisite type that isn't part of the current batch
+// is silently skipped (e.g. "UI" prerequisite for "客户端" is ignored if this
+// particular feature has no UI subtask).
+export const TYPE_PREREQUISITES: Record<string, string[]> = {
+  "客户端": ["UI", "策划/运营"],
+  "UI":     ["策划/运营"],
+};
+
+// Task types whose participation in a feature is NOT assumed either way —
+// the scheduler must ask the user directly ("这个功能需要服务器端吗？") rather
+// than guessing or silently including/excluding them.
+export const OPTIONAL_PARTICIPATION_TYPES = ["服务器"];
+
+// ────────────────────────────────────────────────────────────────────────────
+
 // Keywords that trigger each query type.
 export const MY_TASK_QUERY_KEYWORDS = [
   "我的任务", "我的待办", "我有哪些任务", "我名下", "待办", "任务", "todo",
