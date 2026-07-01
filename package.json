@@ -6,12 +6,22 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "sim": "tsx sim/server.ts"
   },
-  "keywords": ["feishu", "lark", "bitable", "game-dev", "workflow", "cloudflare-workers"],
+  "keywords": [
+    "feishu",
+    "lark",
+    "bitable",
+    "game-dev",
+    "workflow",
+    "cloudflare-workers"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250620.0",
+    "@types/node": "^26.1.0",
+    "tsx": "^4.19.0",
     "typescript": "^6.0.3",
     "wrangler": "^4.95.0"
   }
