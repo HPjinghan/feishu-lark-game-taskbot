@@ -36,6 +36,19 @@ export function addWorkdays(ms: number, n: number): number {
   return cur;
 }
 
+/**
+ * Given the due dates of someone's other currently-active tasks, returns
+ * their next truly free working day — one day after their latest commitment
+ * ends (rolled to a workday), or today if they have nothing pending. Used so
+ * a bare "N天" duration on a new task doesn't silently assume someone is free
+ * starting tomorrow when they're actually still busy with existing work.
+ */
+export function resolveOwnerNextFreeDay(existingDueDates: number[], now: number = Date.now()): number {
+  if (existingDueDates.length === 0) return nextWorkday(now);
+  const latestDue = Math.max(...existingDueDates);
+  return nextWorkday(Math.max(now, latestDue + DAY_MS));
+}
+
 export interface SchedulableTask {
   id: string;
   owner: string; // person or role name — tasks sharing an owner run sequentially, never in parallel

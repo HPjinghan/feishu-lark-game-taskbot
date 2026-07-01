@@ -4,7 +4,6 @@ import {
   FIELD_DUE_DATE, DUE_DATE_LABELS,
   MY_TASK_QUERY_KEYWORDS, ACCEPTANCE_TASK_QUERY_KEYWORDS, HELP_QUERY_KEYWORDS,
 } from "../config";
-import { nextWorkday, addWorkdays } from "./workday";
 
 export function isMyTaskQuery(text: string): boolean {
   const n = text.trim().toLowerCase();
@@ -220,15 +219,14 @@ export function parseTaskDraftSmart(rawTitle: string, optionsByField: Record<str
     if (!draft.type && typeOptions.has(tok)) { draft.type = tok; continue; }
     if (!draft.module && moduleOptions.has(tok)) { draft.module = tok; continue; }
     if (!draft.version && isVersionToken(tok)) { draft.version = tok; continue; }
-    // Bare "N天" (e.g. "3天") — a duration shorthand meaning "starting today,
-    // takes N working days". Only fires if no due date has been set some
-    // other way yet (explicit ddl always wins if present).
-    const durationMatch = draft.dueDate === undefined ? tok.match(/^(\d+)天$/) : null;
+    // Bare "N天" (e.g. "3天") — a duration shorthand. Only the number is
+    // captured here; turning it into real start/due dates happens later
+    // (see handlers/tasks.ts) once we know the owner's current workload —
+    // this function is a pure string parser with no Bitable access. An
+    // explicit ddl/date always wins over this if present.
+    const durationMatch = draft.dueDate === undefined && draft.durationDays === undefined ? tok.match(/^(\d+)天$/) : null;
     if (durationMatch) {
-      const days = Math.max(1, Number(durationMatch[1]));
-      const start = nextWorkday(Date.now());
-      draft.startDate = start;
-      draft.dueDate = addWorkdays(start, days - 1);
+      draft.durationDays = Math.max(1, Number(durationMatch[1]));
       continue;
     }
     titleTokens.push(tok);

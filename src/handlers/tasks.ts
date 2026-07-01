@@ -1,10 +1,32 @@
-import type { Env, BoundUser } from "../types";
+import type { Env, BoundUser, TaskDraft } from "../types";
 import { getTenantAccessToken } from "../lark/auth";
 import { replyText } from "../lark/message";
-import { searchTaskByTaskId, searchTaskByTitleAndType, searchTasksByOwnerOpenId, searchTasksByAcceptorOpenId, createTask } from "../bitable/records";
+import { searchTaskByTaskId, searchTaskByTitleAndType, searchTasksByOwnerOpenId, searchActiveTasksByOwnerOpenId, searchTasksByAcceptorOpenId, createTask } from "../bitable/records";
 import { getSelectOptionsByFieldName } from "../bitable/fields";
 import { normalizeValue, formatTask, formatMyTasks, formatAcceptanceTasks, formatDraftTags } from "../utils/format";
 import { parseTaskDraftSmart } from "../utils/parse";
+import { resolveOwnerNextFreeDay, addWorkdays } from "../utils/workday";
+import { FIELD_DUE_DATE } from "../config";
+
+// Turns a bare "N天" duration into real start/due dates, accounting for the
+// owner's EXISTING workload — not just "tomorrow, blindly". If the input
+// already gave an explicit date (task.dueDate is set), this is a no-op:
+// an explicit date always wins over a duration guess.
+async function resolveDurationDates(env: Env, token: string, task: TaskDraft, ownerOpenId?: string): Promise<void> {
+  if (task.dueDate !== undefined || !task.durationDays) return;
+
+  let existingDueDates: number[] = [];
+  if (ownerOpenId) {
+    const existing = await searchActiveTasksByOwnerOpenId(env, token, ownerOpenId);
+    existingDueDates = existing
+      .map((r: any) => r.fields?.[FIELD_DUE_DATE])
+      .filter((v: any): v is number => typeof v === "number");
+  }
+
+  const start = resolveOwnerNextFreeDay(existingDueDates);
+  task.startDate = start;
+  task.dueDate = addWorkdays(start, task.durationDays - 1);
+}
 
 export async function handleShowTask(env: Env, chatId: string, taskId: string): Promise<void> {
   const token = await getTenantAccessToken(env);
@@ -32,6 +54,7 @@ export async function handleCreateTask(env: Env, chatId: string, title: string, 
   let optionsByField: Record<string, string[]> = {};
   try { optionsByField = await getSelectOptionsByFieldName(env, token); } catch (e: any) { console.error("Failed to load field options:", e?.message || e); }
   const task = parseTaskDraftSmart(title, optionsByField);
+  await resolveDurationDates(env, token, task, owner?.openId);
   const record = await createTask(env, token, task.title, owner?.openId || "", task.type, task.module || "", task.version || "", task.dueDate, task.startDate);
   const taskId = normalizeValue(record?.fields?.["TaskID"]);
   await replyText(env, chatId, [
@@ -72,6 +95,7 @@ export async function handleBatchCreateTasks(
   for (const line of lines) {
     const task = parseTaskDraftSmart(line.rawTitle, optionsByField);
     const owner = line.lineOwner ?? defaultOwner;
+    await resolveDurationDates(env, token, task, owner?.openId);
     try {
       const existing = await searchTaskByTitleAndType(env, token, task.title, task.type, task.module || "", task.version || "");
       if (existing) {

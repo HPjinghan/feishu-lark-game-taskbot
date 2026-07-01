@@ -35,6 +35,11 @@ export interface TaskDraft {
   version?: string;
   startDate?: number;
   dueDate?: number;
+  // Set when the input gave a bare "N天" duration instead of an explicit date.
+  // Left unresolved here on purpose — turning it into real start/due dates
+  // requires knowing the owner's current workload (async, needs Bitable),
+  // which parseTaskDraftSmart (a pure string parser) doesn't have access to.
+  durationDays?: number;
 }
 
 export interface EventFieldValue {

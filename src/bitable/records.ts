@@ -56,6 +56,22 @@ export async function searchTasksByOwnerOpenId(env: Env, token: string, ownerOpe
   return searchTasksByPersonOpenId(env, token, FIELD_OWNER, ownerOpenId, MY_TASK_STATUSES);
 }
 
+const FINISHED_STATUSES = ["已完成", "已停滞"];
+
+// Unlike searchTasksByOwnerOpenId (which only matches the narrow "todo"
+// statuses for the "我的任务" query), this returns EVERY task still on
+// someone's plate — including brand-new tasks that don't have 开发状态 set
+// yet at all. Used for workload/capacity checks ("when is this person
+// actually free"), where a freshly created task with no status is still
+// very much real work sitting on their calendar.
+export async function searchActiveTasksByOwnerOpenId(env: Env, token: string, ownerOpenId: string): Promise<any[]> {
+  const items = await searchRecords(env, token, {
+    conjunction: "and",
+    conditions: [{ field_name: FIELD_OWNER, operator: "contains", value: [ownerOpenId] }],
+  }, 500);
+  return items.filter((r) => !FINISHED_STATUSES.includes(normalizeValue(r.fields?.[FIELD_STATUS])));
+}
+
 export async function searchTasksByAcceptorOpenId(env: Env, token: string, acceptorOpenId: string): Promise<any[]> {
   return searchTasksByPersonOpenId(env, token, FIELD_ACCEPTOR, acceptorOpenId, ACCEPTANCE_TASK_STATUSES);
 }
